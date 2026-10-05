@@ -1,0 +1,43 @@
+TinyDict
+
+Description
+A minimalistic, high-performance, and ultra-compact key-value hash table written in pure C99 for resource-constrained systems. It operates on a keyless append-only principle: original keys are immediately converted into internal 128-bit hashes ('__uint128_t') and discarded, while individual entry deletion is prohibited to prevent memory fragmentation.
+
+Advantages
+Minimal Memory Footprint: Indexing overhead is reduced to an absolute minimum by completely eliminating the storage of original source keys.
+Cache Locality: Data is stored in a flat array of opaque elements, optimizing CPU cache utilization and speeding up data retrieval.
+Stack Allocation Support: The control block size is exported via the 'DICTIONARY_SIZE' constant, allowing users to instantiate the dictionary on the stack without using 'malloc'.
+High API Reliability: A Fail-Fast design with separate channels for error codes and payload data (as seen in 'TryGetValue') completely eliminates the ambiguity of 'NULL' returns.
+Autonomy and Safety: The library avoids global state, strictly forbids calling 'exit()' (using 'return' instead), and ensures diagnostic logs are immediately visible by forcing 'fflush(stderr)'.
+
+Disadvantages
+Probabilistic Nature: Because original keys are discarded, structural collision verification is impossible; operational correctness relies entirely on the uniqueness of the 128-bit hash.
+Restricted Immutability: Individual entry deletion is not supported; the data structure can only be reset atomically via 'ClearDictionary'.
+Mixed Heap Allocation Pattern: Despite being optimized for embedded environments, most retrieval functions ('TryGetValue', 'GetCopyValue', etc.) enforce internal heap allocations.
+Risk of Undefined Behavior: Demands manual data alignment control from the user when allocating the dictionary control block on the stack.
+
+Build
+Requires a C99-compliant compiler and CMake 4.1.2+.
+
+Using CMake
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS="-march=native -flto" .
+cmake --build build --parallel
+
+Without CMake (Direct GCC Compilation)
+
+Static Library ('.a')
+gcc -std=c99 -pedantic-errors -Wall -Wextra -Wpedantic -O3 -march=native -flto -c dict.c hash.c exception.c
+ar rcs libtinydict.a dict.o hash.o exception.o
+
+Dynamic Library ('.dll' / '.so' / '.dylib')
+
+Windows (MinGW):
+  gcc -std=c99 -pedantic-errors -Wall -Wextra -Wpedantic -O3 -march=native -flto -shared dict.c hash.c exception.c -o libtinydict.dll -Wl,--out-implib,libtinydict.dll.a
+
+Linux / macOS: (For macOS, replace '.so' with '.dylib')
+  gcc -std=c99 -pedantic-errors -Wall -Wextra -Wpedantic -O3 -march=native -flto -fPIC -c dict.c hash.c exception.c
+  gcc -shared -flto dict.o hash.o exception.o -o libtinydict.so
+
+Test
+If you want to test the library, use the following compilation command:
+gcc -std=c99 -O3 -march=native -flto test.c -L. -ltinydict -o dict_prog
