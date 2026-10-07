@@ -1,35 +1,67 @@
 #include "dict.h"
 
-#include <stdio.h>
-
+#include "hash.h"
 #include "exception.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
-const size_t DICTIONARY_SIZE = 40;
-const size_t DICTIONARY_ELEMENT_SIZE = 32;
-static const size_t DEFAULT_CAPACITY = 10;
+const uint64_t DICTIONARY_SIZE = 40;
+const uint64_t DICTIONARY_ELEMENT_SIZE = 32;
+static const uint64_t DEFAULT_CAPACITY = 10;
 
 #define MAX_LEN_TEMP_PATH 32
+
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+#define LITTLE_ENDIAN 1
+#elif defined(_MSC_VER)
+#define LITTLE_ENDIAN 1
+#else
+#define LITTLE_ENDIAN 0
+#endif
+
+static inline uint32_t swap_uint32_t  (uint32_t value) {
+  return ((value & 0x000000FFu) << 24)|
+         ((value & 0x0000FF00u) <<  8)|
+         ((value & 0x00FF0000u) >>  8)|
+         ((value & 0xFF000000u) >> 24);
+
+}
+static inline uint64_t swap_uint64_t  (uint64_t value) {
+  return ((value & 0x00000000000000FFull) << 56) |
+         ((value & 0x000000000000FF00ull) << 40) |
+         ((value & 0x0000000000FF0000ull) << 24) |
+         ((value & 0x00000000FF000000ull) << 8)  |
+         ((value & 0x000000FF00000000ull) >> 8)  |
+         ((value & 0x0000FF0000000000ull) >> 24) |
+         ((value & 0x00FF000000000000ull) >> 40) |
+         ((value & 0xFF00000000000000ull) >> 56);
+}
+static inline __uint128_t swap_uint128_t (const __uint128_t value) {
+  const uint64_t high = (uint64_t)(value >> 64);
+  const uint64_t low  = (uint64_t)(value);
+
+  return ((__uint128_t)swap_uint64_t(low) << 64 | swap_uint64_t(high));
+}
 
 struct DictionaryElement {
   __uint128_t key;
   void *value;
-  size_t size;
+  uint64_t size;
 };
 
 struct Dictionary {
-  size_t length;
-  size_t capacity;
+  uint64_t length;
+  uint64_t capacity;
   uint64_t seed;
   DictionaryElement *elements;
 
-  __uint128_t (*GetHashCode)(const void *key, size_t len, uint64_t seed);
+  __uint128_t (*GetHashCode)(const void *key, uint64_t len, uint64_t seed);
 };
 
-static int32_t InitializeDictionaryInternal(Dictionary *dict, const size_t capacity) {
+static int32_t InitializeDictionaryInternal(Dictionary *dict, const uint64_t capacity) {
   if (dict == NULL) {
     eprint(NullDictionaryException);
     return NullDictionaryException;
@@ -47,7 +79,7 @@ static int32_t InitializeDictionaryInternal(Dictionary *dict, const size_t capac
   dict->elements = ptr;
   dict->capacity = capacity;
   dict->length = 0;
-  for (size_t i = 0; i < capacity; i++) {
+  for (uint64_t i = 0; i < capacity; i++) {
     dict->elements[i].key = 0;
     dict->elements[i].value = NULL;
     dict->elements[i].size = 0;
@@ -61,7 +93,7 @@ int32_t InitializeDictionary(Dictionary *dict) {
   return InitializeDictionaryInternal(dict, DEFAULT_CAPACITY);
 }
 
-int32_t InitializeDictionaryWithCapacity(Dictionary *dict, const size_t capacity) {
+int32_t InitializeDictionaryWithCapacity(Dictionary *dict, const uint64_t capacity) {
   return InitializeDictionaryInternal(dict, capacity);
 }
 
@@ -71,7 +103,7 @@ void DestroyDictionary(Dictionary *dict) {
     return;
   }
 
-  for (size_t i = 0; i < dict->capacity; i++) {
+  for (uint64_t i = 0; i < dict->capacity; i++) {
     free(dict->elements[i].value);
     dict->elements[i].value = NULL;
     dict->elements[i].key = 0;
@@ -83,7 +115,7 @@ void DestroyDictionary(Dictionary *dict) {
   dict->elements = NULL;
 }
 
-static int32_t ReallocateDictionaryInternal(Dictionary *dict, size_t capacity) {
+static int32_t ReallocateDictionaryInternal(Dictionary *dict, uint64_t capacity) {
   if (dict == NULL) {
     eprint(NullDictionaryException);
     return NullDictionaryException;
@@ -97,17 +129,17 @@ static int32_t ReallocateDictionaryInternal(Dictionary *dict, size_t capacity) {
     return ArgumentException;
   }
 
-  size_t new_size = 2 * dict->capacity;
+  uint64_t new_size = 2 * dict->capacity;
   if (capacity > 0) {
     new_size = capacity;
   }
-  struct DictionaryElement *ptr = realloc(dict->elements, new_size * sizeof(DictionaryElement));
+  DictionaryElement *ptr = realloc(dict->elements, new_size * sizeof(DictionaryElement));
   if (ptr == NULL) {
     eprint(MemoryOverflowException);
     return MemoryOverflowException;
   }
 
-  for (size_t i = dict->length; i < new_size; i++) {
+  for (uint64_t i = dict->capacity; i < new_size; i++) {
     ptr[i].key = 0;
     ptr[i].size = 0;
     ptr[i].value = NULL;
@@ -118,7 +150,7 @@ static int32_t ReallocateDictionaryInternal(Dictionary *dict, size_t capacity) {
   return 0;
 }
 
-static int32_t ReallocateDictionaryWithCapacityInternal(Dictionary *dict, size_t capacity) {
+static int32_t ReallocateDictionaryWithCapacityInternal(Dictionary *dict, uint64_t capacity) {
   return ReallocateDictionaryInternal(dict, capacity);
 }
 
@@ -126,9 +158,9 @@ static int32_t ReallocateDictionaryWithoutCapacityInternal(Dictionary *dict) {
   return ReallocateDictionaryInternal(dict, 0);
 }
 
-static int32_t GetIndexInternal(const Dictionary *dict, const void *key, size_t sizeKey);
+static int32_t GetIndexInternal(const Dictionary *dict, const void *key, uint64_t sizeKey);
 
-int32_t CreateKeyValueInternal(Dictionary *dict, const void *key, const void *value, size_t sizeKey, size_t sizeValue) {
+static int32_t CreateKeyValueInternal(Dictionary *dict, const void *key, const void *value, uint64_t sizeKey, uint64_t sizeValue) {
   if (dict == NULL) {
     eprint(NullDictionaryException);
     return NullDictionaryException;
@@ -148,6 +180,10 @@ int32_t CreateKeyValueInternal(Dictionary *dict, const void *key, const void *va
   if (sizeKey == 0) {
     eprint(ArgumentException);
     return ArgumentException;
+  }
+  if (dict->GetHashCode == NULL) {
+    eprint(NullHashFunctionException);
+    return NullHashFunctionException;
   }
   const __uint128_t hash_key = dict->GetHashCode(key, sizeKey, dict->seed);
   const int32_t index = GetIndexInternal(dict, key, sizeKey);
@@ -190,15 +226,15 @@ int32_t CreateKeyValueInternal(Dictionary *dict, const void *key, const void *va
   }
 }
 
-int32_t CreateKey(Dictionary *dict, const void *key, size_t sizeKey) {
+int32_t CreateKey(Dictionary *dict, const void *key, uint64_t sizeKey) {
   return CreateKeyValueInternal(dict, key, NULL, sizeKey, 0);
 }
 
-int32_t SetValue(Dictionary *dict, const void *key, const void *value, size_t sizeKey, size_t sizeValue) {
+int32_t SetValue(Dictionary *dict, const void *key, const void *value, uint64_t sizeKey, uint64_t sizeValue) {
   return CreateKeyValueInternal(dict, key, value, sizeKey, sizeValue);
 }
 
-static const void *GetValueInternal(const Dictionary *dict, const void *key, size_t sizeKey) {
+static const void *GetValueInternal(const Dictionary *dict, const void *key, uint64_t sizeKey) {
   if (dict == NULL) {
     eprint(NullDictionaryException);
     return NULL;
@@ -218,11 +254,11 @@ static const void *GetValueInternal(const Dictionary *dict, const void *key, siz
   return value;
 }
 
-const void *GetValue(const Dictionary *dict, const void *key, size_t sizeKey) {
+const void *GetValue(const Dictionary *dict, const void *key, uint64_t sizeKey) {
   return GetValueInternal(dict, key, sizeKey);
 }
 
-void *GetCopyValue(const Dictionary *dict, const void *key, size_t sizeKey) {
+void *GetCopyValue(const Dictionary *dict, const void *key, uint64_t sizeKey) {
   const void *ptr = GetValueInternal(dict, key, sizeKey);
   if (ptr == NULL) return NULL;
   const int32_t index = GetIndexInternal(dict, key, sizeKey);
@@ -231,7 +267,7 @@ void *GetCopyValue(const Dictionary *dict, const void *key, size_t sizeKey) {
     return NULL;
   }
 
-  const size_t size = dict->elements[-index].size;
+  const uint64_t size = dict->elements[-index].size;
   void *mem = malloc(size);
   if (mem == NULL) {
     eprint(MemoryOverflowException);
@@ -242,7 +278,7 @@ void *GetCopyValue(const Dictionary *dict, const void *key, size_t sizeKey) {
   return mem;
 }
 
-static int32_t GetIndexInternal(const Dictionary *dict, const void *key, size_t sizeKey) {
+static int32_t GetIndexInternal(const Dictionary *dict, const void *key, uint64_t sizeKey) {
   if (dict == NULL) {
     eprint(NullDictionaryException);
     return NullDictionaryException;
@@ -255,9 +291,13 @@ static int32_t GetIndexInternal(const Dictionary *dict, const void *key, size_t 
     return INT32_MIN;
   }
 
+  if (dict->GetHashCode == NULL) {
+    eprint(NullHashFunctionException);
+    return NullHashFunctionException;
+  }
   const __uint128_t hash_key = dict->GetHashCode(key, sizeKey, dict->seed);
 
-  for (size_t i = 0; i < dict->length; i++) {
+  for (uint64_t i = 0; i < dict->length; i++) {
     if (dict->elements[i].key == hash_key) {
       return -(int32_t)i;
     }
@@ -266,7 +306,7 @@ static int32_t GetIndexInternal(const Dictionary *dict, const void *key, size_t 
   return INT32_MIN;
 }
 
-int32_t ContainsKey(const Dictionary *dict, const void *key, const size_t sizeKey) {
+int32_t ContainsKey(const Dictionary *dict, const void *key, const uint64_t sizeKey) {
   if (dict == NULL) {
     eprint(NullDictionaryException);
     return NullDictionaryException;
@@ -278,10 +318,14 @@ int32_t ContainsKey(const Dictionary *dict, const void *key, const size_t sizeKe
   if (dict->length == 0) {
     return 0;
   }
+  if (dict->GetHashCode == NULL) {
+    eprint(NullHashFunctionException);
+    return NullHashFunctionException;
+  }
 
   const __uint128_t hash_key = dict->GetHashCode(key, sizeKey, dict->seed);
 
-  for (size_t i = 0; i < dict->length; i++) {
+  for (uint64_t i = 0; i < dict->length; i++) {
     if (dict->elements[i].key == hash_key) {
       return 0;
     }
@@ -290,7 +334,7 @@ int32_t ContainsKey(const Dictionary *dict, const void *key, const size_t sizeKe
   return -1;
 }
 
-int32_t ContainsValue(const Dictionary *dict, const void *value, const size_t sizeValue) {
+int32_t ContainsValue(const Dictionary *dict, const void *value, const uint64_t sizeValue) {
   if (dict == NULL) {
     eprint(NullDictionaryException);
     return NullDictionaryException;
@@ -302,7 +346,7 @@ int32_t ContainsValue(const Dictionary *dict, const void *value, const size_t si
   if (dict->length == 0) {
     return -1;
   }
-  for (size_t i = 0; i < dict->length; i++) {
+  for (uint64_t i = 0; i < dict->length; i++) {
     if (dict->elements[i].key == 0) continue;
     const void *dictValue = dict->elements[i].value;
     if (!memcmp(dictValue, value, sizeValue)) {
@@ -313,7 +357,7 @@ int32_t ContainsValue(const Dictionary *dict, const void *value, const size_t si
   return -1;
 }
 
-int32_t TryGetValue(const Dictionary *dict, const void *key, size_t sizeKey, void **outValue, size_t *outSizeValue) {
+int32_t TryGetValue(const Dictionary *dict, const void *key, uint64_t sizeKey, void **outValue, uint64_t *outSizeValue) {
   if (dict == NULL) {
     eprint(NullDictionaryException);
     return NullDictionaryException;
@@ -355,7 +399,7 @@ void ClearDictionary(Dictionary *dict) {
     eprint(NullDictionaryElementException);
     return;
   }
-  for (size_t i = 0; i < dict->length; i++) {
+  for (uint64_t i = 0; i < dict->length; i++) {
     dict->elements[i].key = 0;
     dict->elements[i].size = 0;
     if (dict->elements[i].value == NULL) continue;
@@ -365,7 +409,7 @@ void ClearDictionary(Dictionary *dict) {
   dict->length = 0;
 }
 
-__uint128_t *GetKeys(const Dictionary *dict, size_t *outCount) {
+__uint128_t *GetKeys(const Dictionary *dict, uint64_t *outCount) {
   if (dict == NULL) {
     eprint(NullDictionaryException);
     return NULL;
@@ -384,13 +428,13 @@ __uint128_t *GetKeys(const Dictionary *dict, size_t *outCount) {
     eprint(MemoryOverflowException);
     return NULL;
   }
-  for (size_t i = 0; i < dict->length; i++) {
+  for (uint64_t i = 0; i < dict->length; i++) {
     values[i] = dict->elements[i].key;
   }
   return values;
 }
 
-void **GetValues(const Dictionary *dict, size_t *outCount) {
+void **GetValues(const Dictionary *dict, uint64_t *outCount) {
   if (outCount == NULL) {
     eprint(ArgumentException);
     return NULL;
@@ -413,12 +457,12 @@ void **GetValues(const Dictionary *dict, size_t *outCount) {
     return NULL;
   }
 
-  for (size_t i = 0; i < dict->length; i++) {
+  for (uint64_t i = 0; i < dict->length; i++) {
     values[i] = malloc(dict->elements[i].size);
     if (values[i] == NULL) {
       eprint(MemoryOverflowException);
       *outCount = 0;
-      for (size_t j = 0; j < i; j++) {
+      for (uint64_t j = 0; j < i; j++) {
         free(values[j]);
       }
       free(values);
@@ -430,7 +474,7 @@ void **GetValues(const Dictionary *dict, size_t *outCount) {
   return values;
 }
 
-int32_t EnsureCapacity(Dictionary *dict, const size_t capacity) {
+int32_t EnsureCapacity(Dictionary *dict, const uint64_t capacity) {
   if (dict == NULL) {
     eprint(NullDictionaryException);
     return NullDictionaryException;
@@ -451,10 +495,10 @@ int32_t GetCount(const Dictionary *dict) {
     eprint(NullDictionaryException);
     return -NullDictionaryException;
   }
-  return dict->length;
+  return (int32_t)dict->length;
 }
 
-int32_t TryAdd(Dictionary *dict, const void *key, const void *value, size_t sizeKey, size_t sizeValue) {
+int32_t TryAdd(Dictionary *dict, const void *key, const void *value, uint64_t sizeKey, uint64_t sizeValue) {
   if (dict == NULL) {
     eprint(NullDictionaryException);
     return NullDictionaryException;
@@ -483,18 +527,18 @@ int32_t EqualsDictionary(const Dictionary *dictA, const struct Dictionary *dictB
   if (dictA->length != dictB->length || dictA->length != dictB->capacity) {
     return -1;
   }
-  for (size_t i = 0; i < dictA->length; i++) {
+  for (uint64_t i = 0; i < dictA->length; i++) {
     if (dictA->elements[i].key != dictB->elements[i].key || dictA->elements[i].size != dictB->elements[i].size) {
       return -1;
     }
-    if (memcmp(dictA->elements[i].value, dictB->elements[i].value, dictA->elements[i].size)) { return -1; }
+    if (memcmp(dictA->elements[i].value, dictB->elements[i].value, dictA->elements[i].size) != 0) { return -1; }
   }
 
   return 0;
 }
 
 int32_t ChangeHashFunction(Dictionary *dict,
-                           __uint128_t (*newHashCode)(const void *key, size_t sizeKey, uint64_t seed)) {
+                           __uint128_t (*newHashCode)(const void *key, uint64_t sizeKey, uint64_t seed)) {
   if (newHashCode == NULL) {
     eprint(ArgumentException);
     return ArgumentException;
@@ -511,7 +555,7 @@ int32_t ChangeHashFunction(Dictionary *dict,
   return 0;
 }
 
-int32_t ChangeHashFunctionUnsafe(Dictionary *dict, __uint128_t (*newHashCode)(const void *key, size_t sizeKey, uint64_t seed)) {
+int32_t ChangeHashFunctionUnsafe(Dictionary *dict, __uint128_t (*newHashCode)(const void *key, uint64_t sizeKey, uint64_t seed)) {
   if (newHashCode == NULL) {
     eprint(ArgumentException);
     return ArgumentException;
@@ -549,6 +593,14 @@ int32_t Serialization(const Dictionary *dict, const char *path) {
     return NullDictionaryElementException;
   }
 
+  char *endian;
+
+#if LITTLE_ENDIAN == 1
+  endian = "LE";
+#else
+  endian = "BE";
+#endif
+
   char *final_path = NULL;
   if (path == NULL) {
     const time_t t = time(NULL);
@@ -558,7 +610,7 @@ int32_t Serialization(const Dictionary *dict, const char *path) {
       eprint(MemoryOverflowException);
       return MemoryOverflowException;
     }
-    size_t len = strftime(final_path, MAX_LEN_TEMP_PATH, "%d%m%y%H%M%S", tm);
+    uint64_t len = strftime(final_path, MAX_LEN_TEMP_PATH, "%d%m%y%H%M%S", tm);
     strcpy(final_path + len, ".bin");
   }
   else {
@@ -579,10 +631,10 @@ int32_t Serialization(const Dictionary *dict, const char *path) {
       strcpy(final_path + strlen(path), ".bin");
     }
     else {
-      const size_t index = prev_ptr - path;
-      const size_t len = strlen(path);
+      const uint64_t index = prev_ptr - path;
+      const uint64_t len = strlen(path);
       int32_t should_add_path = 0;
-      for (size_t i = index; i < len; i++) {
+      for (uint64_t i = index; i < len; i++) {
         if (path[i] == '\\' || path[i] == '/') {
           should_add_path = 1;
           break;
@@ -609,15 +661,17 @@ int32_t Serialization(const Dictionary *dict, const char *path) {
     eprint(IOException);
     return IOException;
   }
+
   fwrite(&magic, sizeof(uint32_t), 1, fp);
+  fwrite(endian, 1, 2, fp);
   fwrite(&dict->seed, sizeof(uint64_t), 1, fp);
-  fwrite(&dict->capacity, sizeof(size_t), 1, fp);
-  fwrite(&dict->length, sizeof(size_t), 1, fp);
+  fwrite(&dict->capacity, sizeof(uint64_t), 1, fp);
+  fwrite(&dict->length, sizeof(uint64_t), 1, fp);
   fwrite(&flags, sizeof(uint32_t), 1, fp);
 
-  for (size_t i = 0; i < dict->length; i++) {
+  for (uint64_t i = 0; i < dict->length; i++) {
     fwrite(&dict->elements[i].key, sizeof(__uint128_t), 1, fp);
-    fwrite(&dict->elements[i].size, sizeof(size_t), 1, fp);
+    fwrite(&dict->elements[i].size, sizeof(uint64_t), 1, fp);
     fwrite(dict->elements[i].value, 1, dict->elements[i].size, fp);
   }
   fclose(fp);
@@ -650,12 +704,41 @@ int32_t Deserialization(Dictionary *dict, const char *path) {
     fclose(fp);
     return InvalidStateException;
   }
+  uint8_t endian_sys = 0;
+#if LITTLE_ENDIAN == 1
+  endian_sys = 1;
+#else
+  endian_sys = 2;
+#endif
+
+  uint8_t endian_file = 0;
+  char *endian_str = malloc(3);
+  endian_str[2] = '\0';
+  fread(endian_str, 1, 2, fp);
+  if (strcmp(endian_str, "LE") == 0) {
+    endian_file = 1;
+  }
+  else if (strcmp(endian_str, "BE") == 0) {
+    endian_file = 2;
+  }
+  else {
+    eprint(InvalidStateException);
+    free(endian_str);
+    fclose(fp);
+  }
+  free(endian_str);
   fread(&dict->seed, sizeof(uint64_t), 1, fp);
-  fread(&dict->capacity, sizeof(size_t), 1, fp);
-  fread(&dict->length, sizeof(size_t), 1, fp);
+  fread(&dict->capacity, sizeof(uint64_t), 1, fp);
+  fread(&dict->length, sizeof(uint64_t), 1, fp);
   uint32_t flag = 0;
 
   fread(&flag, sizeof(uint32_t), 1, fp);
+  if (endian_file != endian_sys) {
+    dict->seed = swap_uint64_t(dict->seed);
+    dict->capacity = swap_uint64_t(dict->capacity);
+    dict->length = swap_uint64_t(dict->length);
+    flag = swap_uint32_t(flag);
+  }
   if (flag != flags) {
     eprint(InvalidStateException);
     fclose(fp);
@@ -675,16 +758,22 @@ int32_t Deserialization(Dictionary *dict, const char *path) {
     eprint(MemoryOverflowException);
     return MemoryOverflowException;
   }
-  for (size_t i = 0; i < dict->length; i++) {
+  for (uint64_t i = 0; i < dict->length; i++) {
     __uint128_t key = 0;
-    size_t size = 0;
+    uint64_t size = 0;
 
     fread(&key, sizeof(__uint128_t), 1, fp);
-    fread(&size, sizeof(size_t), 1, fp);
+    fread(&size, sizeof(uint64_t), 1, fp);
+
+    if (endian_file != endian_sys) {
+      key = swap_uint128_t(key);
+      size = swap_uint64_t(size);
+    }
+
     if (size > 0) {
       values[i] = malloc(size);
       if (values[i] == NULL) {
-        for (size_t j = 0; j < i; j++) free(values[j]);
+        for (uint64_t j = 0; j < i; j++) free(values[j]);
         free(values);
         dict->seed = 0;
         dict->capacity = 0;
@@ -707,7 +796,7 @@ int32_t Deserialization(Dictionary *dict, const char *path) {
     dict->elements[i].size = size;
     dict->elements[i].value = values[i];
   }
-  for (size_t i = dict->length; i < dict->capacity; i++) {
+  for (uint64_t i = dict->length; i < dict->capacity; i++) {
     dict->elements[i].key = 0;
     dict->elements[i].size = 0;
     dict->elements[i].value = NULL;
@@ -719,5 +808,128 @@ int32_t Deserialization(Dictionary *dict, const char *path) {
   values = NULL;
 
   fclose(fp);
+  return 0;
+}
+
+static uint8_t PercentageMove = 25;
+
+static int32_t MoveOrCreate(const Dictionary *dict, const void *key, uint64_t sizeKey, uint64_t sizeValue) {
+  int32_t index = GetIndexInternal(dict, key, sizeKey);
+  if (index == INT32_MIN) {
+    return -1;
+  }
+  if (index > 0) {
+    return index;
+  }
+  index = -index;
+  const uint64_t sizeVal1 = dict->elements[index].size;
+
+  if (sizeVal1 < sizeValue) return -1;
+  if (sizeValue == 0) return -1;
+  if (sizeVal1 * 100 / sizeValue <= PercentageMove) return 0;
+
+  return -1;
+}
+
+int32_t Update(Dictionary *dict, const void *key, const void *value, uint64_t sizeKey, uint64_t sizeValue) {
+  if (dict == NULL) {
+    eprint(NullDictionaryException);
+    return NullDictionaryException;
+  }
+  if (dict->elements == NULL) {
+    eprint(NullDictionaryElementException);
+    return NullDictionaryElementException;
+  }
+  if (key == NULL) {
+    eprint(ArgumentException);
+    return ArgumentException;
+  }
+
+  int32_t index = GetIndexInternal(dict, key, sizeKey);
+
+  if (index == INT32_MIN) {
+    return -1;
+  }
+  if (index > 0) {
+    return index;
+  }
+
+  index = -index;
+
+
+  if (value == NULL) {
+    free(dict->elements[index].value);
+    dict->elements[index].value = NULL;
+    dict->elements[index].size = 0;
+  }
+  else {
+    int32_t result = MoveOrCreate(dict, key, sizeKey, sizeValue);
+    if (result > 0) {
+      return result;
+    }
+    if (result == -1) {
+      free(dict->elements[index].value);
+      dict->elements[index].value = malloc(sizeValue);
+      if (dict->elements[index].value == NULL) {
+        eprint(MemoryOverflowException);
+        return MemoryOverflowException;
+      }
+    }
+    memcpy(dict->elements[index].value, value, sizeValue);
+    dict->elements[index].size = sizeValue;
+  }
+
+  return 0;
+}
+
+int32_t TryAddOrUpdate(Dictionary *dict, const void *key, const void *value, uint64_t sizeKey, uint64_t sizeValue) {
+  if (dict == NULL) {
+    eprint(NullDictionaryException);
+    return NullDictionaryException;
+  }
+  if (dict->elements == NULL) {
+    eprint(NullDictionaryElementException);
+    return NullDictionaryElementException;
+  }
+  if (key == NULL) {
+    eprint(ArgumentException);
+    return ArgumentException;
+  }
+  int32_t index = GetIndexInternal(dict, key, sizeKey);
+  if (index > 0) {
+    return index;
+  }
+
+  if (dict->length == dict->capacity) {
+    int32_t result = ReallocateDictionaryWithoutCapacityInternal(dict);
+    if (result > 0) return result;
+  }
+
+  if (index == INT32_MIN) {
+    int32_t result = CreateKeyValueInternal(dict, key, value, sizeKey, sizeValue);
+    return result == 0 ? -1 : result;
+  }
+  else {
+    int32_t result = Update(dict, key, value, sizeKey, sizeValue);
+    return result;
+  }
+}
+
+int32_t GetCapacityLeft(const Dictionary *dict) {
+  if (dict == NULL) {
+    eprint(NullDictionaryException);
+    return -NullDictionaryException;
+  }
+  if (dict->elements == NULL) {
+    eprint(NullDictionaryElementException);
+    return -NullDictionaryElementException;
+  }
+
+  return (int32_t)(dict->capacity - dict->length);
+}
+
+int32_t ChangePercentageMoveOrCreate(const uint8_t newPercentage) {
+  if (newPercentage > 50) return -1;
+  PercentageMove = newPercentage;
   return 0;
 }

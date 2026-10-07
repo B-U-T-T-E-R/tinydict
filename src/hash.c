@@ -4,13 +4,13 @@
 
 #define FORCE_INLINE inline __attribute__((always_inline))
 
-FORCE_INLINE uint64_t ROTL64(uint64_t x, int8_t r) {
+FORCE_INLINE uint64_t ROTL64(const uint64_t x, const int8_t r) {
   return x << r | x >> (64 - r);
 }
 
 #define BIG_CONSTANT(x) (x##ULL)
 
-FORCE_INLINE uint64_t getblock64(const uint64_t *blocks, const size_t i) {
+FORCE_INLINE uint64_t getblock64(const uint64_t *blocks, const uint64_t i) {
   uint64_t val;
   memcpy(&val, blocks + i, sizeof(uint64_t));
   return val;
@@ -25,10 +25,10 @@ FORCE_INLINE uint64_t fmix64(uint64_t k) {
   return k;
 }
 
-__uint128_t MurmurHash3_x64_128(const void *key, const size_t len, const uint64_t seed)
+__uint128_t MurmurHash3_x64_128(const void *key, const uint64_t len, const uint64_t seed)
 {
   const uint8_t *data = key;
-  const size_t nblocks = len / 16;
+  const uint64_t nblocks = len / 16;
 
   uint64_t h1 = seed;
   uint64_t h2 = seed;
@@ -38,7 +38,7 @@ __uint128_t MurmurHash3_x64_128(const void *key, const size_t len, const uint64_
 
   const uint64_t *blocks = (const uint64_t *)data;
 
-  for(size_t i = 0; i < nblocks; i++)
+  for(uint64_t i = 0; i < nblocks; i++)
   {
     uint64_t k1 = getblock64(blocks,i*2+0);
     uint64_t k2 = getblock64(blocks,i*2+1);

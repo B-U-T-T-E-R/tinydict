@@ -4,6 +4,6 @@
 #include <stdint.h>
 #include <stddef.h>
 
-extern __uint128_t MurmurHash3_x64_128(const void *key, size_t len, uint64_t seed);
+extern __uint128_t MurmurHash3_x64_128(const void *key, uint64_t len, uint64_t seed);
 
 #endif //DICT_HASH_H

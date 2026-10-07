@@ -10,6 +10,7 @@ static const char *get_string_exception(const enum DictionaryException ex) {
     case MemoryOverflowException: return "MemoryOverflowException";
     case InvalidStateException: return "InvalidStateException";
     case IOException: return "IOException";
+    case NullHashFunctionException: return "NullHashFunctionException";
     case UnknownException: default: return "UnknownException";
   }
 }
