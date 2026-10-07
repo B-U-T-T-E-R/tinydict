@@ -9,6 +9,7 @@ static const char *get_string_exception(const enum DictionaryException ex) {
     case ArgumentException: return "ArgumentException";
     case MemoryOverflowException: return "MemoryOverflowException";
     case InvalidStateException: return "InvalidStateException";
+    case IOException: return "IOException";
     case UnknownException: default: return "UnknownException";
   }
 }

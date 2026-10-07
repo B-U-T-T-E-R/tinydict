@@ -9,6 +9,7 @@ Cache Locality: Data is stored in a flat array of opaque elements, optimizing CP
 Stack Allocation Support: The control block size is exported via the 'DICTIONARY_SIZE' constant, allowing users to instantiate the dictionary on the stack without using 'malloc'.
 High API Reliability: A Fail-Fast design with separate channels for error codes and payload data (as seen in 'TryGetValue') completely eliminates the ambiguity of 'NULL' returns.
 Autonomy and Safety: The library avoids global state, strictly forbids calling 'exit()' (using 'return' instead), and ensures diagnostic logs are immediately visible by forcing 'fflush(stderr)'.
+Binary Persistence: Built-in Serialization() dumps the flat elements array directly to disk—automatically generating a timestamped file via the 'DDMMYYhhmmss.bin' mask if no path is provided—while Deserialization() reads the binary layout to safely rebuild the control fields and heap-allocated boundaries from scratch.
 
 Disadvantages
 Probabilistic Nature: Because original keys are discarded, structural collision verification is impossible; operational correctness relies entirely on the uniqueness of the 128-bit hash.

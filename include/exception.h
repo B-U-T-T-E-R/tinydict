@@ -7,6 +7,7 @@ enum DictionaryException {
   ArgumentException = 3,
   MemoryOverflowException = 4,
   InvalidStateException = 5,
+  IOException = 6,
   UnknownException = 100,
 };
 

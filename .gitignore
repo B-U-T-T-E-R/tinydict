@@ -12,6 +12,7 @@ cmake-build-debug/
 
 .idea/
 cmake-build-*/
+temp/
 
 .DS_Store
 Thumbs.db

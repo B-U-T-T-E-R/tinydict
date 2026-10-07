@@ -16,6 +16,7 @@ extern const size_t DICTIONARY_ELEMENT_SIZE;
 //  ArgumentException
 //  MemoryOverflowException
 int32_t InitializeDictionary(Dictionary *dict);
+
 //Initializing a dictionary with a specified capacity.
 //Returns 0 if successful
 //Exceptions:
@@ -23,6 +24,7 @@ int32_t InitializeDictionary(Dictionary *dict);
 //  ArgumentException
 //  MemoryOverflowException
 int32_t InitializeDictionaryWithCapacity(Dictionary *dict, size_t capacity);
+
 //Freeing a dictionary from RAM.
 void DestroyDictionary(Dictionary *dict);
 
@@ -34,6 +36,7 @@ void DestroyDictionary(Dictionary *dict);
 //  MemoryOverflowException
 //  InvalidStateException
 int32_t CreateKey(Dictionary *dict, const void *key, size_t sizeKey);
+
 //Sets a value by key (not recommended;
 //if a value already exists for the key,
 //it will be deleted and a new one assigned)
@@ -51,6 +54,7 @@ int32_t SetValue(Dictionary *dict, const void *key, const void *value, size_t si
 //  NullDictionaryException
 //  ArgumentException
 const void * GetValue(const Dictionary *dict, const void *key, size_t sizeKey);
+
 //Returns a copy of the value by key (IMPORTANT: the value must be freed after use)
 //Returns NULL if the key does not exist
 //Exceptions:
@@ -66,6 +70,7 @@ void * GetCopyValue(const Dictionary *dict, const void *key, size_t sizeKey);
 //  NullDictionaryException
 //  NullDictionaryElementException
 int32_t ContainsKey(const Dictionary *dict, const void *key, size_t sizeKey);
+
 //Checks if the value exists (regardless of the key)
 //Returns 0 if the values does exist
 //Exceptions:
@@ -146,6 +151,7 @@ int32_t TryAdd(Dictionary *dict, const void *key, const void *value, size_t size
 //  NullDictionaryException
 //  NullDictionaryElementException
 int32_t EqualsDictionary(const Dictionary *dictA, const Dictionary *dictB);
+
 //Updates the hash function unless the dictionary is not empty
 //(has at least one key-value pair)
 //Returns 0 if successful
@@ -154,6 +160,7 @@ int32_t EqualsDictionary(const Dictionary *dictA, const Dictionary *dictB);
 //  NullDictionaryException
 //  InvalidStateException
 int32_t ChangeHashFunction(Dictionary *dict, __uint128_t (*newHashCode)(const void *key, size_t sizeKey, uint64_t seed));
+
 //Updates the seed for hash function unless the dictionary is not empty
 //(has at least one key-value pair)
 //Returns 0 if successful
@@ -162,5 +169,38 @@ int32_t ChangeHashFunction(Dictionary *dict, __uint128_t (*newHashCode)(const vo
 //  NullDictionaryException
 //  InvalidStateException
 int32_t ChangeSeedForHash(Dictionary *dict, uint64_t newSeed);
+
+//Changes the hash function in a dictionary;
+//not recommended, as there is no re-hashing function (UNSAFE).
+//Returns 0 if successful
+//Exceptions:
+//  ArgumentException
+//  NullDictionaryException
+int32_t ChangeHashFunctionUnsafe(Dictionary *dict, __uint128_t (*newHashCode)(const void *key, size_t sizeKey, uint64_t seed));
+
+//Serializes the dictionary;
+//if NULL is passed as a path,
+//it will be saved using the mask 'DDMMYYhhmmss.bin'
+//Returns 0 if successful
+//Exceptions:
+//  NullDictionaryException
+//  NullDictionaryElementException
+//  MemoryOverflowException
+//  IOException
+int32_t Serialization(const Dictionary *dict, const char *path);
+
+//Deserializes the dictionary;
+//all elements will be allocated on the heap.
+//IMPORTANT: DO NOT ALLOCATE IN ADVANCE.
+//After deserialization, use ChangeHashFunctionUnsafe if you used a
+//different hash function; otherwise, the Default Hash Function will be used.
+//Returns 0 if successful
+//Exceptions:
+//  NullDictionaryException
+//  ArgumentException
+//  IOException
+//  InvalidStateException
+//  MemoryOverflowException
+int32_t Deserialization(Dictionary *dict, const char *path);
 
 #endif //DICT_DICT_H

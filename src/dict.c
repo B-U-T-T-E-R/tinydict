@@ -1,13 +1,18 @@
 #include "dict.h"
 
+#include <stdio.h>
+
 #include "exception.h"
 
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 const size_t DICTIONARY_SIZE = 40;
 const size_t DICTIONARY_ELEMENT_SIZE = 32;
 static const size_t DEFAULT_CAPACITY = 10;
+
+#define MAX_LEN_TEMP_PATH 32
 
 struct DictionaryElement {
   __uint128_t key;
@@ -254,7 +259,7 @@ static int32_t GetIndexInternal(const Dictionary *dict, const void *key, size_t 
 
   for (size_t i = 0; i < dict->length; i++) {
     if (dict->elements[i].key == hash_key) {
-      return -i;
+      return -(int32_t)i;
     }
   }
 
@@ -492,7 +497,7 @@ int32_t ChangeHashFunction(Dictionary *dict,
                            __uint128_t (*newHashCode)(const void *key, size_t sizeKey, uint64_t seed)) {
   if (newHashCode == NULL) {
     eprint(ArgumentException);
-    return NullDictionaryException;
+    return ArgumentException;
   }
   if (dict == NULL) {
     eprint(NullDictionaryException);
@@ -501,6 +506,19 @@ int32_t ChangeHashFunction(Dictionary *dict,
   if (dict->length > 0) {
     eprint(InvalidStateException);
     return InvalidStateException;
+  }
+  dict->GetHashCode = newHashCode;
+  return 0;
+}
+
+int32_t ChangeHashFunctionUnsafe(Dictionary *dict, __uint128_t (*newHashCode)(const void *key, size_t sizeKey, uint64_t seed)) {
+  if (newHashCode == NULL) {
+    eprint(ArgumentException);
+    return ArgumentException;
+  }
+  if (dict == NULL) {
+    eprint(NullDictionaryException);
+    return NullDictionaryException;
   }
   dict->GetHashCode = newHashCode;
   return 0;
@@ -516,5 +534,190 @@ int32_t ChangeSeedForHash(Dictionary *dict, const uint64_t newSeed) {
     return InvalidStateException;
   }
   dict->seed = newSeed;
+  return 0;
+}
+
+static const uint32_t magic = 0x594E5954;
+static const uint32_t flags = 0x454c5300;
+int32_t Serialization(const Dictionary *dict, const char *path) {
+  if (dict == NULL) {
+    eprint(NullDictionaryException);
+    return NullDictionaryException;
+  }
+  if (dict->elements == NULL) {
+    eprint(NullDictionaryElementException);
+    return NullDictionaryElementException;
+  }
+
+  char *final_path = NULL;
+  if (path == NULL) {
+    const time_t t = time(NULL);
+    const struct tm *tm = localtime(&t);
+    final_path = malloc(MAX_LEN_TEMP_PATH);
+    if (final_path == NULL) {
+      eprint(MemoryOverflowException);
+      return MemoryOverflowException;
+    }
+    size_t len = strftime(final_path, MAX_LEN_TEMP_PATH, "%d%m%y%H%M%S", tm);
+    strcpy(final_path + len, ".bin");
+  }
+  else {
+    const char *prev_ptr = NULL;
+    const char *ptr = strchr(path, '.');
+    while (ptr != NULL) {
+      prev_ptr = ptr;
+      ptr = strchr(ptr, '.');
+    }
+
+    if (prev_ptr == NULL) {
+      final_path = malloc(strlen(path) + 5);
+      if (final_path == NULL) {
+        eprint(MemoryOverflowException);
+        return MemoryOverflowException;
+      }
+      strcpy(final_path, path);
+      strcpy(final_path + strlen(path), ".bin");
+    }
+    else {
+      const size_t index = prev_ptr - path;
+      const size_t len = strlen(path);
+      int32_t should_add_path = 0;
+      for (size_t i = index; i < len; i++) {
+        if (path[i] == '\\' || path[i] == '/') {
+          should_add_path = 1;
+          break;
+        }
+      }
+      if (should_add_path) {
+        final_path = malloc(len + 5);
+        if (final_path == NULL) {
+          eprint(MemoryOverflowException);
+          return MemoryOverflowException;
+        }
+        strcpy(final_path, path);
+        strcpy(final_path + len, ".bin");
+      }
+      else {
+        final_path = strdup(path);
+      }
+    }
+  }
+
+  FILE *fp = fopen(final_path, "wb");
+  if (fp == NULL) {
+    free(final_path);
+    eprint(IOException);
+    return IOException;
+  }
+  fwrite(&magic, sizeof(uint32_t), 1, fp);
+  fwrite(&dict->seed, sizeof(uint64_t), 1, fp);
+  fwrite(&dict->capacity, sizeof(size_t), 1, fp);
+  fwrite(&dict->length, sizeof(size_t), 1, fp);
+  fwrite(&flags, sizeof(uint32_t), 1, fp);
+
+  for (size_t i = 0; i < dict->length; i++) {
+    fwrite(&dict->elements[i].key, sizeof(__uint128_t), 1, fp);
+    fwrite(&dict->elements[i].size, sizeof(size_t), 1, fp);
+    fwrite(dict->elements[i].value, 1, dict->elements[i].size, fp);
+  }
+  fclose(fp);
+
+  free(final_path);
+
+  return 0;
+}
+int32_t Deserialization(Dictionary *dict, const char *path) {
+  if (dict == NULL) {
+    eprint(NullDictionaryException);
+    return NullDictionaryException;
+  }
+
+  if (path == NULL) {
+    eprint(ArgumentException);
+    return ArgumentException;
+  }
+
+  FILE *fp = fopen(path, "rb");
+  if (fp == NULL) {
+    eprint(IOException);
+    return IOException;
+  }
+
+  uint32_t temp_magic = 0;
+  fread(&temp_magic, sizeof(uint32_t), 1, fp);
+  if (temp_magic != magic) {
+    eprint(InvalidStateException);
+    fclose(fp);
+    return InvalidStateException;
+  }
+  fread(&dict->seed, sizeof(uint64_t), 1, fp);
+  fread(&dict->capacity, sizeof(size_t), 1, fp);
+  fread(&dict->length, sizeof(size_t), 1, fp);
+  uint32_t flag = 0;
+
+  fread(&flag, sizeof(uint32_t), 1, fp);
+  if (flag != flags) {
+    eprint(InvalidStateException);
+    fclose(fp);
+    return InvalidStateException;
+  }
+  dict->elements = malloc(DICTIONARY_ELEMENT_SIZE * dict->capacity);
+
+  void **values = malloc(dict->capacity * sizeof(void *));
+  if (values == NULL) {
+    dict->seed = 0;
+    dict->capacity = 0;
+    dict->length = 0;
+    free(dict->elements);
+    dict->elements = NULL;
+    fclose(fp);
+    printf("%d\n", __LINE__);
+    eprint(MemoryOverflowException);
+    return MemoryOverflowException;
+  }
+  for (size_t i = 0; i < dict->length; i++) {
+    __uint128_t key = 0;
+    size_t size = 0;
+
+    fread(&key, sizeof(__uint128_t), 1, fp);
+    fread(&size, sizeof(size_t), 1, fp);
+    if (size > 0) {
+      values[i] = malloc(size);
+      if (values[i] == NULL) {
+        for (size_t j = 0; j < i; j++) free(values[j]);
+        free(values);
+        dict->seed = 0;
+        dict->capacity = 0;
+        dict->length = 0;
+        free(dict->elements);
+        dict->elements = NULL;
+        fclose(fp);
+
+        printf("%zu\t%d\n", size, __LINE__);
+        eprint(MemoryOverflowException);
+        return MemoryOverflowException;
+      }
+      fread(values[i], 1, size, fp);
+    }
+    else {
+      values[i] = NULL;
+    }
+
+    dict->elements[i].key = key;
+    dict->elements[i].size = size;
+    dict->elements[i].value = values[i];
+  }
+  for (size_t i = dict->length; i < dict->capacity; i++) {
+    dict->elements[i].key = 0;
+    dict->elements[i].size = 0;
+    dict->elements[i].value = NULL;
+  }
+
+  dict->GetHashCode = MurmurHash3_x64_128;
+
+  free(values);
+  values = NULL;
+
+  fclose(fp);
   return 0;
 }

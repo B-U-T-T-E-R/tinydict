@@ -16,8 +16,3 @@ add_library(tinydict
 )
 
 target_include_directories(tinydict PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-
-
-add_executable(dict_test test/test.c)
-
-target_link_libraries(dict_test PRIVATE tinydict)

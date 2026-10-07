@@ -83,6 +83,7 @@ void Test_Keyless_Behavior_And_Clear() {
 int main() {
     printf("Running Tiny Dict tests...\n\n");
 
+    Dictionary *dict = malloc(DICTIONARY_SIZE);
     Test_Initialization_And_Exceptions();
     Test_Keyless_Behavior_And_Clear();
 
